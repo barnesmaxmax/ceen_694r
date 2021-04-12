@@ -1,0 +1,128 @@
+---
+title: "Practice Exam"
+author: "Max Barnes"
+date: "4/8/2021"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+# packages used in this chapter
+library(tidyverse) # general data munging
+library(haven) # read spss data into R
+library(mlogit) # multinomial logit estimation
+library(modelsummary) # pretty tables
+library(kableExtra)   # pretty tables
+library(labelled) # point labels
+
+# helping with book creation
+library(knitr)
+knitr::opts_chunk$set(cache = TRUE)
+```
+
+## Reading in the Data
+
+```{r cars}
+data(Car, package = "mlogit")
+car_mlogit <- Car %>%
+  mutate(choice = gsub("choice", "", choice)) %>%
+  dfidx( varying = 5:70, shape = "wide", choice = "choice", sep = "")
+```
+
+## Alternative representations of model parameters (log transform, divisions)
+
+```{r statsJtoWork}
+#calculations =======================================
+#calculate price
+ car_price <- car_mlogit %>%
+  select(choice, price, type) %>%
+  group_by(type) %>%
+  summarise(exp(mean(price)), min(price))
+price_raw <- apply(car_price,2,function(x) mean(x[x>0]))
+
+#calculate OVTT
+sf_wm_ovtt <- sf_work_mode  %>%
+  select(hhid, perid, altnum, chosen, ovtt, hhinc) %>%
+  group_by(hhid, perid) %>%
+  mutate( chosen = max(chosen * altnum) ) %>%
+  spread(altnum, ovtt, fill = 0)
+ovtt_raw <- apply(sf_wm_ovtt,2,function(x) mean(x[x>0]))
+
+#calculate OVTT for walk (using TVTT)
+sf_wm_tvtt <- sf_work_mode  %>%
+  select(hhid, perid, altnum, chosen, tvtt, hhinc) %>%
+  group_by(hhid, perid) %>%
+  mutate( chosen = max(chosen * altnum) ) %>%
+  spread(altnum, tvtt, fill = 0)
+tvtt_raw <- apply(sf_wm_tvtt,2,function(x) mean(x[x>0]))
+#calculate market share
+Base_model <- mlogit(chosen ~ cost + tvtt | hhinc, data = sf_mlogit)
+mrktshr_raw <- Base_model$freq / nrow(sf_wm_tvtt)
+#calculate COST
+sf_wm_cost <- sf_work_mode  %>%
+  select(hhid, perid, altnum, chosen, cost, hhinc) %>%
+  group_by(hhid, perid) %>%
+  mutate( chosen = max(chosen * altnum) ) %>%
+  spread(altnum, cost, fill = 0)
+cost_raw <- apply(sf_wm_cost,2,function(x) mean(x[x>0]))
+
+#create the table ==================================
+statsJtoWork <- tibble(
+  "Mode"= c("1. Drive Alone","2. Shared Ride (2)","3. Shared Ride (3+)", "4. Transit", "5. Bike", "6. Walk"),
+  "Fraction of Sample with Mode Available (%)" = c(94.6,100.0,100.0,79.6,34.6,29.4),
+  "Market Share (%)" = c(mrktshr_raw) * 100,
+  "Average IVTT (minutes)" = c(ivtt_raw[ -c(1:4)]), 
+  "Average OVTT (minutes)" = c(ovtt_raw[c(5:9)],  tvtt_raw[c(10)]),
+  "Average Cost (1990 cents)" = c(cost_raw[-c(1:4)]))
+
+#display the table =================================
+kbl(statsJtoWork, digits = 1,
+    caption = "Sample Statistics for Bay Area Journey-to-Work Modal Data") %>% 
+  kable_styling()
+```
+
+
+```{r basic-estimation}
+base <- mlogit(choice ~ price + cost, data = car_mlogit)
+
+# estimate a model with constants only by constraining a single generic variable
+# to be zero
+market_shares <- mlogit(choice ~ price, data = car_mlogit, constPar = c("price" = 0))
+
+# Estimate a null model by constraining ALL the parameters to be zero. 
+fixed_coefs <- rep(0,6) %>% setNames(c(names(coef(market_shares)), "price"))
+null_model <- mlogit(choice ~ price, data = car_mlogit, start = fixed_coefs, iterlim = 0)
+```
+
+```{r basic-estimation-table}
+basic_estimation <- list(
+  "Null Model" = null_model,
+  "Market Shares" = market_shares,
+  "Base Model" = base
+)
+
+modelsummary(
+  basic_estimation, 
+  title = "Estimation Results for Zero Coefficient, Constants Only, and Base Models"
+)
+```
+## Statistical significance and behavioral intuitiveness of the model parameters
+
+```{r table5-4, echo = F}
+
+Base_model <- mlogit(choice ~ cost + range | price, data = car_mlogit)
+
+#take out intercept by doing a -1 after the pipe
+
+modelsummary(Base_model, statistic = "statistic", statistic_vertical = FALSE, stars = TRUE, notes = list('Note: The numbers in the parentheses are the t-statistics'))
+
+```
+
+## Comparative relatoinships between model parameters (VOT)
+
+## Statistical goodness of fit tests between candidate models
+
+## Data segmentation
+
+## Nesting structures
